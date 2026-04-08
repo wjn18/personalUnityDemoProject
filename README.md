@@ -12,7 +12,7 @@ Unity project repository for `personalUnityDemoProject`.
 
 ## Scenes
 
-Current scenes found in `Assets/Scenes/`:
+Current scenes in `Assets/Scenes/`:
 
 - `Level1`
 - `LoginScene`

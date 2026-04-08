@@ -31,3 +31,10 @@ Recordings/
 *.VC.db
 
 sysinfo.txt
+
+# Local development prompts and agent notes
+/AGENTS.md
+/Agents.md
+/AgentRules.md
+/PROJECT_CONTEXT.md
+/Prompts.md
