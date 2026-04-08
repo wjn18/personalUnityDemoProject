@@ -1,0 +1,22 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 020fbffdfdd5dbe428dda1ac93a594ed, type: 3}
+  m_Name: Base02
+  m_EditorClassIdentifier: 
+  baseId: 02
+  baseName: Church
+  level: 2
+  maxHP: 1300
+  takenAtStart: 0
+  normalModel: {fileID: 7812407232211881302, guid: b9ca784c63eea3a46add1b5b4c4a1ea4, type: 3}
+  brokenModel: {fileID: 7812407232211881302, guid: b9ca784c63eea3a46add1b5b4c4a1ea4, type: 3}
+  takenModel: {fileID: 7812407232211881302, guid: b9ca784c63eea3a46add1b5b4c4a1ea4, type: 3}

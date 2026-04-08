@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0963c17d670d6d4418eeb3e6ae0b9965, type: 3}
+  m_Name: DefaultTank
+  m_EditorClassIdentifier: 
+  tankId: 01
+  tankName: default
+  baseMaxHP: 100
+  moveSpeed: 10
+  turnSpeed: 120
+  tankModelPrefab: {fileID: 3861688120886576242, guid: 3ca547f9acdc94b4d8c807f6b5f7e229, type: 3}
+  defaultWeapon: {fileID: 11400000, guid: d3779bdd38619084d83e60463af89649, type: 2}

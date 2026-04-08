@@ -1,0 +1,20 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9c312778d3189aa4cb6453470c01c7a9, type: 3}
+  m_Name: Guard01
+  m_EditorClassIdentifier: 
+  guardId: 01
+  guardName: Knight
+  level: 2
+  maxHP: 300
+  AffectValue: 35
+  guardPrefab: {fileID: 6626920582163359082, guid: 2315cd3564ca69f4fa0eef45450c6205, type: 3}

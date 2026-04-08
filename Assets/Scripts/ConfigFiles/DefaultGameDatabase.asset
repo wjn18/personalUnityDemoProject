@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2704c207a0d285647a5be135ebf4b96e, type: 3}
+  m_Name: DefaultGameDatabase
+  m_EditorClassIdentifier: 
+  tanks:
+  - {fileID: 11400000, guid: 48c128e39add1144da346841a5548e45, type: 2}
+  - {fileID: 11400000, guid: 40ebd5051ad8c8945968cf92d149d779, type: 2}
+  - {fileID: 11400000, guid: a3394c3566afd364f903919d22db2271, type: 2}
+  - {fileID: 11400000, guid: a3394c3566afd364f903919d22db2271, type: 2}
+  weapons:
+  - {fileID: 11400000, guid: d3779bdd38619084d83e60463af89649, type: 2}
+  - {fileID: 11400000, guid: 4fac2a0d176656948a0a4e163e9cd55f, type: 2}
+  - {fileID: 11400000, guid: 4fac2a0d176656948a0a4e163e9cd55f, type: 2}
+  enemies:
+  - {fileID: 11400000, guid: 18e38533f9df4674f8d7d01173c6ca14, type: 2}
+  - {fileID: 11400000, guid: 89871993d66b80d47839d7e20cc6e281, type: 2}
+  - {fileID: 11400000, guid: 4b5bbd050e5276b45b09e3aace990953, type: 2}
