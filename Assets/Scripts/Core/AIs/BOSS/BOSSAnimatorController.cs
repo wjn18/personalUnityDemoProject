@@ -33,7 +33,6 @@ public class BossAnimatorController : MonoBehaviour
     public float faceStopDistance = 0.05f;
 
     [Header("Attack Facing")]
-    public bool alignBeforeAttack = true;
     public float preAttackFaceAngle = 10f;
     public float preAttackRotateSpeed = 18f;
     public float maxAlignTime = 0.4f;
@@ -44,23 +43,27 @@ public class BossAnimatorController : MonoBehaviour
     public bool clampInput = true;
     public bool useDeltaPositionFallback = true;
 
-    [Header("Root Motion Attack")]
-    public bool useRootMotionDuringAttack = true;
-    public bool useRootRotationDuringAttack = true;
-
     private Animator anim;
     private Vector3 lastPosition;
     private bool isDead;
 
     private AttackMotionState attackMotionState = AttackMotionState.None;
+    private BossAttackDefinition activeAttack;
     private int pendingAttackIndex = -1;
     private float alignTimer = 0f;
     private bool attackTriggered = false;
+    private BossAttackPhase attackPhase = BossAttackPhase.None;
+    private Vector3 attackStartForward = Vector3.forward;
+    private Vector3 attackLockedForward = Vector3.forward;
+    private bool attackDirectionLocked = true;
 
     public Animator Animator => anim;
     public bool IsAligningBeforeAttack => attackMotionState == AttackMotionState.AligningBeforeAttack;
     public bool IsInRootMotionAttack => attackMotionState == AttackMotionState.InRootMotionAttack;
-    public bool IsBusyWithAttackMotion => IsAligningBeforeAttack || IsInRootMotionAttack;
+    public bool HasPendingAttackTrigger => attackTriggered && attackMotionState == AttackMotionState.None;
+    public bool IsBusyWithAttackMotion => IsAligningBeforeAttack || IsInRootMotionAttack || HasPendingAttackTrigger;
+    public BossAttackDefinition ActiveAttack => activeAttack;
+    public BossAttackPhase CurrentAttackPhase => attackPhase;
 
     void Awake()
     {
@@ -86,6 +89,7 @@ public class BossAnimatorController : MonoBehaviour
             return;
 
         UpdateAttackMotionState();
+        UpdateAttackFacing();
 
         if (!IsBusyWithAttackMotion && target != null && ShouldFaceTargetNormally())
             FaceTargetNormally();
@@ -106,12 +110,37 @@ public class BossAnimatorController : MonoBehaviour
         {
             if (!IsInAttackState())
                 EndRootMotionAttack();
+            return;
         }
-        else
-        {
-            if (IsInAttackState() && attackTriggered)
-                BeginRootMotionAttack();
-        }
+
+        if (IsInAttackState() && attackTriggered)
+            BeginRootMotionAttack();
+    }
+
+    void UpdateAttackFacing()
+    {
+        if (attackMotionState != AttackMotionState.InRootMotionAttack)
+            return;
+
+        if (activeAttack == null)
+            return;
+
+        if (!activeAttack.trackTargetUntilDirectionLock)
+            return;
+
+        Vector3 desiredForward = attackDirectionLocked
+            ? attackLockedForward
+            : GetClampedDirectionToTarget();
+
+        if (desiredForward.sqrMagnitude < 0.0001f)
+            return;
+
+        Quaternion desiredRotation = Quaternion.LookRotation(desiredForward, Vector3.up);
+        transform.rotation = Quaternion.RotateTowards(
+            transform.rotation,
+            desiredRotation,
+            Mathf.Max(0f, activeAttack.turnSpeed) * Time.deltaTime
+        );
     }
 
     bool ShouldFaceTargetNormally()
@@ -133,9 +162,7 @@ public class BossAnimatorController : MonoBehaviour
 
     void FaceTargetNormally()
     {
-        Vector3 toTarget = target.position - transform.position;
-        toTarget.y = 0f;
-
+        Vector3 toTarget = GetPlanarDirectionToTarget();
         if (toTarget.sqrMagnitude < faceStopDistance * faceStopDistance)
             return;
 
@@ -153,9 +180,7 @@ public class BossAnimatorController : MonoBehaviour
 
         alignTimer += Time.deltaTime;
 
-        Vector3 toTarget = target.position - transform.position;
-        toTarget.y = 0f;
-
+        Vector3 toTarget = GetPlanarDirectionToTarget();
         if (toTarget.sqrMagnitude > 0.0001f)
         {
             Quaternion targetRot = Quaternion.LookRotation(toTarget.normalized, Vector3.up);
@@ -167,23 +192,17 @@ public class BossAnimatorController : MonoBehaviour
         }
 
         float angle = GetAngleToTarget();
-
         if (angle <= preAttackFaceAngle || alignTimer >= maxAlignTime)
             TriggerPendingAttackImmediately();
     }
 
     float GetAngleToTarget()
     {
-        if (target == null)
-            return 0f;
-
-        Vector3 toTarget = target.position - transform.position;
-        toTarget.y = 0f;
-
+        Vector3 toTarget = GetPlanarDirectionToTarget();
         if (toTarget.sqrMagnitude < 0.0001f)
             return 0f;
 
-        return Vector3.Angle(transform.forward, toTarget.normalized);
+        return Vector3.Angle(GetPlanarForward(), toTarget.normalized);
     }
 
     void UpdateMoveParams()
@@ -226,27 +245,27 @@ public class BossAnimatorController : MonoBehaviour
         return Vector3.zero;
     }
 
-    public void RequestAttack(int attackIndex)
+    public void RequestAttack(BossAttackDefinition attack)
     {
-        if (isDead)
+        if (isDead || attack == null)
             return;
 
         if (IsInKneelLikeState())
             return;
 
-        pendingAttackIndex = attackIndex;
+        activeAttack = attack;
+        pendingAttackIndex = attack.attackIndex;
+        attackPhase = BossAttackPhase.Startup;
         attackTriggered = false;
+        attackStartForward = GetPlanarForward();
+        attackLockedForward = attackStartForward;
+        attackDirectionLocked = !attack.trackTargetUntilDirectionLock;
 
-        if (alignBeforeAttack && target != null)
+        if (attack.alignBeforeAttack && target != null)
         {
             attackMotionState = AttackMotionState.AligningBeforeAttack;
             alignTimer = 0f;
-
-            if (agent != null && agent.enabled)
-            {
-                agent.isStopped = true;
-                agent.ResetPath();
-            }
+            StopAgentForAttack();
         }
         else
         {
@@ -261,9 +280,7 @@ public class BossAnimatorController : MonoBehaviour
 
         if (IsInKneelLikeState())
         {
-            pendingAttackIndex = -1;
-            attackTriggered = false;
-            attackMotionState = AttackMotionState.None;
+            ResetAttackData();
             return;
         }
 
@@ -280,25 +297,12 @@ public class BossAnimatorController : MonoBehaviour
     void BeginRootMotionAttack()
     {
         attackMotionState = AttackMotionState.InRootMotionAttack;
-
-        if (agent != null && agent.enabled)
-        {
-            agent.isStopped = true;
-            agent.ResetPath();
-            agent.updatePosition = false;
-            agent.updateRotation = false;
-        }
-
-        anim.applyRootMotion = useRootMotionDuringAttack;
+        StopAgentForAttack();
+        anim.applyRootMotion = ShouldApplyRootMotionPosition();
     }
 
     void EndRootMotionAttack()
     {
-        attackMotionState = AttackMotionState.None;
-        attackTriggered = false;
-        pendingAttackIndex = -1;
-        alignTimer = 0f;
-
         anim.applyRootMotion = false;
 
         if (agent != null && agent.enabled)
@@ -306,8 +310,65 @@ public class BossAnimatorController : MonoBehaviour
             agent.updatePosition = true;
             agent.updateRotation = false;
             agent.Warp(transform.position);
-            agent.isStopped = false;
+            agent.isStopped = true;
         }
+
+        ResetAttackData();
+    }
+
+    void ResetAttackData()
+    {
+        attackMotionState = AttackMotionState.None;
+        activeAttack = null;
+        pendingAttackIndex = -1;
+        alignTimer = 0f;
+        attackTriggered = false;
+        attackPhase = BossAttackPhase.None;
+        attackDirectionLocked = true;
+        attackStartForward = GetPlanarForward();
+        attackLockedForward = attackStartForward;
+    }
+
+    void StopAgentForAttack()
+    {
+        if (agent == null || !agent.enabled)
+            return;
+
+        agent.isStopped = true;
+        agent.ResetPath();
+        agent.updatePosition = false;
+        agent.updateRotation = false;
+        agent.velocity = Vector3.zero;
+    }
+
+    public void SyncAttackPhase(BossAttackPhase phase)
+    {
+        attackPhase = phase;
+
+        if (activeAttack == null)
+            return;
+
+        if (!activeAttack.trackTargetUntilDirectionLock)
+            return;
+
+        if (!activeAttack.requireDirectionLockEvent && phase == BossAttackPhase.Active)
+            LockCurrentAttackDirection();
+    }
+
+    public void AbortAttackMotion()
+    {
+        anim.applyRootMotion = false;
+
+        if (agent != null && agent.enabled)
+        {
+            agent.updatePosition = true;
+            agent.updateRotation = false;
+            agent.Warp(transform.position);
+            agent.isStopped = true;
+            agent.velocity = Vector3.zero;
+        }
+
+        ResetAttackData();
     }
 
     void OnAnimatorMove()
@@ -324,14 +385,30 @@ public class BossAnimatorController : MonoBehaviour
         Vector3 deltaPos = anim.deltaPosition;
         Quaternion deltaRot = anim.deltaRotation;
 
-        if (useRootMotionDuringAttack)
+        if (ShouldApplyRootMotionPosition())
             transform.position += deltaPos;
 
-        if (useRootRotationDuringAttack)
+        if (ShouldApplyRootMotionRotation())
             transform.rotation = transform.rotation * deltaRot;
 
         if (agent != null && agent.enabled)
             agent.nextPosition = transform.position;
+    }
+
+    bool ShouldApplyRootMotionPosition()
+    {
+        return activeAttack == null || activeAttack.useRootMotionPosition;
+    }
+
+    bool ShouldApplyRootMotionRotation()
+    {
+        if (activeAttack == null)
+            return true;
+
+        if (activeAttack.trackTargetUntilDirectionLock)
+            return false;
+
+        return activeAttack.useRootMotionRotation;
     }
 
     public void PlayDeath()
@@ -340,9 +417,7 @@ public class BossAnimatorController : MonoBehaviour
             return;
 
         isDead = true;
-        attackMotionState = AttackMotionState.None;
-        pendingAttackIndex = -1;
-        attackTriggered = false;
+        AbortAttackMotion();
 
         anim.applyRootMotion = false;
         anim.SetTrigger(deathTriggerParam);
@@ -356,12 +431,79 @@ public class BossAnimatorController : MonoBehaviour
         }
     }
 
+    public void LockCurrentAttackDirection()
+    {
+        if (activeAttack == null || !activeAttack.trackTargetUntilDirectionLock)
+            return;
+
+        attackLockedForward = GetClampedDirectionToTarget();
+        if (attackLockedForward.sqrMagnitude < 0.0001f)
+            return;
+
+        attackDirectionLocked = true;
+        transform.rotation = Quaternion.LookRotation(attackLockedForward, Vector3.up);
+    }
+
+    public Vector3 GetCurrentAttackDirection()
+    {
+        if (activeAttack != null && activeAttack.trackTargetUntilDirectionLock)
+        {
+            if (attackDirectionLocked)
+                return attackLockedForward;
+
+            return GetClampedDirectionToTarget();
+        }
+
+        return GetPlanarForward();
+    }
+
+    Vector3 GetClampedDirectionToTarget()
+    {
+        Vector3 toTarget = GetPlanarDirectionToTarget();
+        if (toTarget.sqrMagnitude < 0.0001f)
+            return attackLockedForward;
+
+        Vector3 startForward = attackStartForward;
+        if (startForward.sqrMagnitude < 0.0001f)
+            startForward = GetPlanarForward();
+
+        float maxAngle = activeAttack != null ? Mathf.Max(0f, activeAttack.maxTurnAngle) : 0f;
+
+        return Vector3.RotateTowards(
+            startForward.normalized,
+            toTarget.normalized,
+            maxAngle * Mathf.Deg2Rad,
+            0f
+        ).normalized;
+    }
+
+    Vector3 GetPlanarDirectionToTarget()
+    {
+        if (target == null)
+            return Vector3.zero;
+
+        Vector3 toTarget = target.position - transform.position;
+        toTarget.y = 0f;
+        return toTarget;
+    }
+
+    Vector3 GetPlanarForward()
+    {
+        Vector3 forward = transform.forward;
+        forward.y = 0f;
+
+        if (forward.sqrMagnitude < 0.0001f)
+            return Vector3.forward;
+
+        return forward.normalized;
+    }
+
     public bool IsInAttackState()
     {
-        if (anim == null) return false;
+        if (anim == null)
+            return false;
 
         AnimatorStateInfo current = anim.GetCurrentAnimatorStateInfo(0);
-
         if (anim.IsInTransition(0))
         {
             AnimatorStateInfo next = anim.GetNextAnimatorStateInfo(0);
@@ -373,10 +515,10 @@ public class BossAnimatorController : MonoBehaviour
 
     public bool IsInDeathState()
     {
-        if (anim == null) return false;
+        if (anim == null)
+            return false;
 
         AnimatorStateInfo current = anim.GetCurrentAnimatorStateInfo(0);
-
         if (anim.IsInTransition(0))
         {
             AnimatorStateInfo next = anim.GetNextAnimatorStateInfo(0);

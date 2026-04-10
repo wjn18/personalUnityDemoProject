@@ -20,7 +20,7 @@ public partial class PlayerController
         isRolling = IsInRollAnimation();
 
         if (wasRolling && !isRolling)
-            ClearRollMoveSpeedOverrideInternal();
+            EndRollState();
     }
 
     void SyncHitReactionStateFromAnimator()
@@ -134,9 +134,11 @@ public partial class PlayerController
             canMoveCancelAttack = false;
             moveWasHeldWhenCancelWindowOpened = false;
             attackWindowActive = false;
+            attackHitConfirmedThisWindow = false;
             ClearAttackMoveSpeedOverrideInternal();
             ClearCurrentAttackData();
             hitTargetsThisSwing.Clear();
+            SetWeaponTrailActive(false);
             animator.SetBool(queueNextAttackParam, false);
         }
     }
@@ -186,12 +188,32 @@ public partial class PlayerController
     public void AE_BeginAttackWindow()
     {
         hitTargetsThisSwing.Clear();
+        attackHitConfirmedThisWindow = false;
         attackWindowActive = true;
     }
 
     public void AE_EndAttackWindow()
     {
+        if (attackWindowActive && !attackHitConfirmedThisWindow)
+            PlayPlayerAttackMissSFX();
+
         attackWindowActive = false;
+        attackHitConfirmedThisWindow = false;
+    }
+
+    public void AE_PlayAttackSFX()
+    {
+        PlayPlayerAttackStartSFX();
+    }
+
+    public void AE_SlashVFXOn()
+    {
+        SetWeaponTrailActive(true);
+    }
+
+    public void AE_SlashVFXOff()
+    {
+        SetWeaponTrailActive(false);
     }
 
     public void AE_DoAttackHit()
@@ -258,6 +280,7 @@ public partial class PlayerController
         canMoveCancelAttack = false;
         moveWasHeldWhenCancelWindowOpened = false;
         attackWindowActive = false;
+        attackHitConfirmedThisWindow = false;
         ClearAttackMoveSpeedOverrideInternal();
         hitTargetsThisSwing.Clear();
         SetCurrentAttackData(attack2Data);
@@ -277,6 +300,7 @@ public partial class PlayerController
         canMoveCancelAttack = false;
         moveWasHeldWhenCancelWindowOpened = false;
         attackWindowActive = false;
+        attackHitConfirmedThisWindow = false;
         ClearAttackMoveSpeedOverrideInternal();
         hitTargetsThisSwing.Clear();
         SetCurrentAttackData(attack3Data);
@@ -296,6 +320,7 @@ public partial class PlayerController
         canMoveCancelAttack = false;
         moveWasHeldWhenCancelWindowOpened = false;
         attackWindowActive = false;
+        attackHitConfirmedThisWindow = false;
         ClearAttackMoveSpeedOverrideInternal();
         hitTargetsThisSwing.Clear();
         SetCurrentAttackData(attack4Data);

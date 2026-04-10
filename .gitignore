@@ -31,6 +31,7 @@ Recordings/
 *.VC.db
 
 sysinfo.txt
+.DS_Store
 
 # Local development prompts and agent notes
 /AGENTS.md

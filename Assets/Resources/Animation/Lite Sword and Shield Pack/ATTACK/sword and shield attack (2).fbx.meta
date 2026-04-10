@@ -64,8 +64,29 @@ ModelImporter:
         floatParameter: 0
         intParameter: 0
         messageOptions: 0
+      - time: 0.048347495
+        functionName: AE_SetAttackMoveSpeed
+        data: 
+        objectReferenceParameter: {instanceID: 0}
+        floatParameter: 3
+        intParameter: 0
+        messageOptions: 0
+      - time: 0.3385672
+        functionName: AE_SlashVFXOn
+        data: 
+        objectReferenceParameter: {instanceID: 0}
+        floatParameter: 0
+        intParameter: 0
+        messageOptions: 0
       - time: 0.34205556
         functionName: AE_BeginAttackWindow
+        data: 
+        objectReferenceParameter: {instanceID: 0}
+        floatParameter: 0
+        intParameter: 0
+        messageOptions: 0
+      - time: 0.49950927
+        functionName: AE_SlashVFXOff
         data: 
         objectReferenceParameter: {instanceID: 0}
         floatParameter: 0
@@ -78,7 +99,7 @@ ModelImporter:
         floatParameter: 0
         intParameter: 0
         messageOptions: 0
-      - time: 0.5660252
+      - time: 0.54370373
         functionName: AE_EndAttackWindow
         data: 
         objectReferenceParameter: {instanceID: 0}
@@ -92,6 +113,13 @@ ModelImporter:
         floatParameter: 0
         intParameter: 0
         messageOptions: 0
+      - time: 0.951592
+        functionName: AE_ClearAttackMoveSpeed
+        data: 
+        objectReferenceParameter: {instanceID: 0}
+        floatParameter: 0
+        intParameter: 0
+        messageOptions: 0
       - time: 1
         functionName: AE_EndAttack
         data: 
@@ -99,15 +127,8 @@ ModelImporter:
         floatParameter: 0
         intParameter: 0
         messageOptions: 0
-      - time: 0.048347495
-        functionName: AE_SetAttackMoveSpeed
-        data: 
-        objectReferenceParameter: {instanceID: 0}
-        floatParameter: 3
-        intParameter: 0
-        messageOptions: 0
-      - time: 0.951592
-        functionName: AE_ClearAttackMoveSpeed
+      - time: 0.30408773
+        functionName: AE_PlayAttackSFX
         data: 
         objectReferenceParameter: {instanceID: 0}
         floatParameter: 0

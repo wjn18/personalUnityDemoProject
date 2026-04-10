@@ -20,26 +20,17 @@ public class BossRangedSkillCaster : MonoBehaviour
     [Header("Configs")]
     public ProjectileConfig[] projectileConfigs;
 
-    public void FireAtPlayer(int attackIndex)
+    public bool Fire(int attackIndex, Vector3 attackDirection)
     {
         ProjectileConfig cfg = GetConfig(attackIndex);
         if (cfg == null || cfg.projectilePrefab == null || cfg.firePoint == null)
-            return;
+            return false;
 
-        Transform targetTransform = target;
-        if (targetTransform == null && ownerAI != null)
-            targetTransform = ownerAI.player;
+        attackDirection.y = 0f;
 
-        Vector3 direction;
-        if (targetTransform != null)
-        {
-            Vector3 aimPoint = targetTransform.position + Vector3.up * 1f;
-            direction = (aimPoint - cfg.firePoint.position).normalized;
-        }
-        else
-        {
-            direction = cfg.firePoint.forward;
-        }
+        Vector3 direction = attackDirection.sqrMagnitude > 0.0001f
+            ? attackDirection.normalized
+            : cfg.firePoint.forward;
 
         BossProjectile projectile = Instantiate(
             cfg.projectilePrefab,
@@ -49,11 +40,14 @@ public class BossRangedSkillCaster : MonoBehaviour
 
         projectile.Initialize(
             ownerAI != null ? ownerAI.gameObject : gameObject,
+            ownerAI,
             direction,
             cfg.damage,
             cfg.speed,
             cfg.lifeTime
         );
+
+        return true;
     }
 
     ProjectileConfig GetConfig(int attackIndex)

@@ -1,4 +1,4 @@
-using UnityEngine;
+ï»¿using UnityEngine;
 
 public partial class PlayerController
 {
@@ -10,7 +10,7 @@ public partial class PlayerController
         bool inAttackAnimation = IsInAttackAnimation();
         bool inPowerUpAnimation = IsInPowerUpAnimation();
 
-        // ²»Ö»ÒÀÀµ Animator tag£¬Ö±½ÓÓÃÔËÐÐÊ±×´Ì¬Ëø¶¯×÷ÊäÈë
+        // ä¸åªä¾èµ– Animator tagï¼Œç›´æŽ¥ç”¨è¿è¡Œæ—¶çŠ¶æ€é”åŠ¨ä½œè¾“å…¥
         bool shouldForceActionMovement =
             isAttacking ||
             sprintAttackActive ||
@@ -140,7 +140,7 @@ public partial class PlayerController
         if (IsInPowerUpAnimation() || isPoweringUp)
             return Vector3.zero;
 
-        // Ö»ÒªÔËÐÐÊ±´¦ÓÚ¹¥»÷×´Ì¬£¬¾ÍÇ¿ÖÆÊ¹ÓÃ»º´æ·½Ïò
+        // åªè¦è¿è¡Œæ—¶å¤„äºŽæ”»å‡»çŠ¶æ€ï¼Œå°±å¼ºåˆ¶ä½¿ç”¨ç¼“å­˜æ–¹å‘
         if (isAttacking || sprintAttackActive || heavyAttackActive || IsInAttackAnimation())
         {
             float attackSpeed = useAttackMoveSpeedOverride ? attackMoveSpeedOverride : 0f;
@@ -149,7 +149,7 @@ public partial class PlayerController
 
         if (isRolling)
         {
-            if (useStoredRollMotion || allowRollMovementAssist)
+            if (lockOnRollUsesScriptMotion || useStoredRollMotion || allowRollMovementAssist)
             {
                 float finalRollSpeed = useRollMoveSpeedOverride
                     ? rollMoveSpeedOverride
@@ -188,6 +188,17 @@ public partial class PlayerController
 
     Vector3 GetRollStartDirection()
     {
+        if (IsLockedOn())
+        {
+            Vector3 lockOnInputDir = GetNormalizedWorldInput(
+                Input.GetAxisRaw("Horizontal"),
+                Input.GetAxisRaw("Vertical")
+            );
+
+            if (lockOnInputDir.sqrMagnitude > 0.0001f)
+                return lockOnInputDir;
+        }
+
         Vector3 inputDir = GetNormalizedWorldInput(
             Input.GetAxisRaw("Horizontal"),
             Input.GetAxisRaw("Vertical")

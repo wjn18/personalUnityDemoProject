@@ -57,6 +57,27 @@ ModelImporter:
       bodyMask: 01000000010000000100000001000000010000000100000001000000010000000100000001000000010000000100000001000000
       curves: []
       events:
+      - time: 0.050820127
+        functionName: AE_SetAttackMoveSpeed
+        data: 
+        objectReferenceParameter: {instanceID: 0}
+        floatParameter: 3
+        intParameter: 0
+        messageOptions: 0
+      - time: 0.26021937
+        functionName: AE_PlayAttackSFX
+        data: 
+        objectReferenceParameter: {instanceID: 0}
+        floatParameter: 0
+        intParameter: 0
+        messageOptions: 0
+      - time: 0.30716386
+        functionName: AE_SlashVFXOn
+        data: 
+        objectReferenceParameter: {instanceID: 0}
+        floatParameter: 3
+        intParameter: 0
+        messageOptions: 0
       - time: 0.30791447
         functionName: AE_BeginAttackWindow
         data: 
@@ -64,29 +85,29 @@ ModelImporter:
         floatParameter: 0
         intParameter: 0
         messageOptions: 0
-      - time: 0.45143732
+      - time: 0.45368698
         functionName: AE_EnableMoveCancel
         data: 
         objectReferenceParameter: {instanceID: 0}
         floatParameter: 0
         intParameter: 0
         messageOptions: 0
-      - time: 0.5890845
+      - time: 0.5221202
         functionName: AE_EndAttackWindow
         data: 
         objectReferenceParameter: {instanceID: 0}
         floatParameter: 0
         intParameter: 0
         messageOptions: 0
-      - time: 0.8898705
-        functionName: AE_DisableMoveCancel
+      - time: 0.63970494
+        functionName: AE_SlashVFXOff
         data: 
         objectReferenceParameter: {instanceID: 0}
-        floatParameter: 0
+        floatParameter: 3
         intParameter: 0
         messageOptions: 0
-      - time: 0.99224174
-        functionName: AE_EndAttack
+      - time: 0.8898705
+        functionName: AE_DisableMoveCancel
         data: 
         objectReferenceParameter: {instanceID: 0}
         floatParameter: 0
@@ -99,11 +120,11 @@ ModelImporter:
         floatParameter: 0
         intParameter: 0
         messageOptions: 0
-      - time: 0.050820127
-        functionName: AE_SetAttackMoveSpeed
+      - time: 0.99224174
+        functionName: AE_EndAttack
         data: 
         objectReferenceParameter: {instanceID: 0}
-        floatParameter: 3
+        floatParameter: 0
         intParameter: 0
         messageOptions: 0
       transformMask: []

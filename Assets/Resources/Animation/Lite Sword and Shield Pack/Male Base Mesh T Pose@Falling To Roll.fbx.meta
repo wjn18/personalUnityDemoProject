@@ -37,7 +37,7 @@ ModelImporter:
       takeName: mixamo.com
       internalID: -203655887218126122
       firstFrame: 0
-      lastFrame: 54
+      lastFrame: 40
       wrapMode: 0
       orientationOffsetY: 0
       level: 0
@@ -64,22 +64,29 @@ ModelImporter:
         floatParameter: 8
         intParameter: 0
         messageOptions: 0
+      - time: 0.17747179
+        functionName: StartAfterImage
+        data: 
+        objectReferenceParameter: {instanceID: 0}
+        floatParameter: 0
+        intParameter: 0
+        messageOptions: 0
       - time: 0.5198348
         functionName: AE_SetRollMoveSpeed
         data: 
         objectReferenceParameter: {instanceID: 0}
-        floatParameter: 3
+        floatParameter: 4
         intParameter: 0
         messageOptions: 0
       - time: 0.63964415
         functionName: AE_SetRollMoveSpeed
         data: 
         objectReferenceParameter: {instanceID: 0}
-        floatParameter: 1.5
+        floatParameter: 3
         intParameter: 0
         messageOptions: 0
-      - time: 0.9059316
-        functionName: AE_ClearAttackMoveSpeed
+      - time: 0.7849214
+        functionName: StopAfterImage
         data: 
         objectReferenceParameter: {instanceID: 0}
         floatParameter: 0

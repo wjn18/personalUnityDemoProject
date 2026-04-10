@@ -15,23 +15,6 @@ public class BOSSAI : MonoBehaviour, IDamageable
         Dead
     }
 
-    public enum BossAttackType
-    {
-        Normal,
-        MeleeSkill,
-        Ranged
-    }
-
-    [System.Serializable]
-    public class AttackConfig
-    {
-        public string displayName;
-        public int attackIndex;
-        public BossAttackType attackType;
-        public float cooldown = 1f;
-        public float attackRange = 3f;
-    }
-
     [Header("Refs")]
     public Transform player;
     public NavMeshAgent agent;
@@ -39,6 +22,8 @@ public class BOSSAI : MonoBehaviour, IDamageable
     public BossMeleeDamageWindow meleeDamageWindow;
     public BossRangedSkillCaster rangedSkillCaster;
     public BossStaggerSystem staggerSystem;
+    public BossWeaponTrailController weaponTrailVFX;
+    public CombatAudioController combatAudioController;
 
     [Header("Stats")]
     public float maxHP = 1000f;
@@ -46,49 +31,31 @@ public class BOSSAI : MonoBehaviour, IDamageable
 
     [Header("Detection")]
     public float engageDistance = 25f;
-    public float meleeDecisionDistance = 6f;
 
-    [Header("Movement")]
+    [Header("Locomotion")]
     public float approachStopDistance = 3.5f;
-    public float retreatDistance = 5f;
     public float repathInterval = 0.15f;
+    public float combatDistanceTolerance = 0.35f;
 
-    [Header("Damage Retreat Rule")]
-    public float damageWindow = 2f;
-    public float retreatDamageThreshold = 40f;
-    public float retreatCooldown = 4f;
+    [Header("Attacks")]
+    public BossAttackDefinition[] attacks = CreateDefaultAttackSet();
 
     [Header("Runtime")]
     public BossState currentState = BossState.Idle;
     public int currentAttackIndex = -1;
-
-    [Header("Attacks")]
-    public AttackConfig[] attacks = new AttackConfig[]
-    {
-        new AttackConfig { displayName = "Normal 1", attackIndex = 0, attackType = BossAttackType.Normal, cooldown = 4.0f, attackRange = 4.0f },
-        new AttackConfig { displayName = "Normal 2", attackIndex = 1, attackType = BossAttackType.Normal, cooldown = 4.0f, attackRange = 4.0f },
-        new AttackConfig { displayName = "Normal 3", attackIndex = 2, attackType = BossAttackType.Normal, cooldown = 4.0f, attackRange = 4.0f },
-        new AttackConfig { displayName = "Melee Skill 1", attackIndex = 3, attackType = BossAttackType.MeleeSkill, cooldown = 8.0f, attackRange = 6f },
-        new AttackConfig { displayName = "Melee Skill 2", attackIndex = 4, attackType = BossAttackType.MeleeSkill, cooldown = 10.0f, attackRange = 6.5f },
-        new AttackConfig { displayName = "Melee Skill 3", attackIndex = 5, attackType = BossAttackType.MeleeSkill, cooldown = 10.0f, attackRange = 6.5f },
-        new AttackConfig { displayName = "Ranged", attackIndex = 6, attackType = BossAttackType.Ranged, cooldown = 15.0f, attackRange = 12.0f },
-    };
+    public BossAttackPhase currentAttackPhase = BossAttackPhase.None;
 
     [Header("Debug")]
     public bool drawGizmos = true;
 
-    readonly Dictionary<int, float> nextReadyTimeByIndex = new Dictionary<int, float>();
-    readonly List<DamageRecord> damageRecords = new List<DamageRecord>();
+    private readonly Dictionary<int, float> nextReadyTimeByIndex = new Dictionary<int, float>();
 
-    Vector3 retreatTarget;
-    float lastRepathTime;
-    float nextRetreatAllowedTime;
-
-    struct DamageRecord
-    {
-        public float time;
-        public float amount;
-    }
+    private BossAttackDefinition currentAttack;
+    private float currentAttackElapsed;
+    private float lastRepathTime;
+    private int currentAttackWindowIndex;
+    private bool attackHitConfirmedThisWindow;
+    private bool rangedAttackResultPending;
 
     void Awake()
     {
@@ -101,8 +68,17 @@ public class BOSSAI : MonoBehaviour, IDamageable
         if (staggerSystem == null)
             staggerSystem = GetComponent<BossStaggerSystem>();
 
+        if (weaponTrailVFX == null)
+            weaponTrailVFX = GetComponentInChildren<BossWeaponTrailController>(true);
+
+        if (combatAudioController == null)
+            combatAudioController = GetComponentInChildren<CombatAudioController>(true);
+
         agent.updateRotation = false;
         currentHP = Mathf.Clamp(currentHP, 0f, maxHP);
+
+        if (attacks == null || attacks.Length == 0)
+            attacks = CreateDefaultAttackSet();
 
         BuildCooldownTable();
     }
@@ -126,16 +102,9 @@ public class BOSSAI : MonoBehaviour, IDamageable
 
         if (staggerSystem != null && staggerSystem.ShouldLockBossAction())
         {
-            StopMove();
-            currentState = BossState.Idle;
-
-            if (meleeDamageWindow != null)
-                meleeDamageWindow.ForceCloseWindow();
-
+            ForceInterruptAction();
             return;
         }
-
-        CleanupOldDamageRecords();
 
         if (currentHP <= 0f)
         {
@@ -145,12 +114,11 @@ public class BOSSAI : MonoBehaviour, IDamageable
 
         if (currentState == BossState.Attacking)
         {
-            UpdateAttackingState();
+            UpdateAttackState();
             return;
         }
 
-        float distance = Vector3.Distance(transform.position, player.position);
-
+        float distance = DistanceToPlayer();
         if (distance > engageDistance)
         {
             StopMove();
@@ -158,84 +126,74 @@ public class BOSSAI : MonoBehaviour, IDamageable
             return;
         }
 
-        if (ShouldRetreat())
-            StartRetreat();
-
-        if (currentState == BossState.Retreat)
+        BossAttackDefinition attack = SelectAttack(distance);
+        if (attack != null)
         {
-            UpdateRetreat();
+            StartAttack(attack);
             return;
         }
 
-        DecideAction(distance);
+        UpdatePositioning(distance);
     }
 
     void BuildCooldownTable()
     {
         nextReadyTimeByIndex.Clear();
 
-        if (attacks == null) return;
+        if (attacks == null)
+            return;
 
         for (int i = 0; i < attacks.Length; i++)
         {
-            if (attacks[i] == null) continue;
+            BossAttackDefinition attack = attacks[i];
+            if (attack == null)
+                continue;
 
-            if (!nextReadyTimeByIndex.ContainsKey(attacks[i].attackIndex))
-                nextReadyTimeByIndex.Add(attacks[i].attackIndex, 0f);
+            if (!nextReadyTimeByIndex.ContainsKey(attack.attackIndex))
+                nextReadyTimeByIndex.Add(attack.attackIndex, 0f);
         }
     }
 
-    void DecideAction(float distanceToPlayer)
+    float DistanceToPlayer()
     {
-        if (staggerSystem != null && staggerSystem.ShouldLockBossAction())
-            return;
-
-        if (distanceToPlayer < meleeDecisionDistance)
-        {
-            AttackConfig meleeSkill = PickRandomAvailableAttack(BossAttackType.MeleeSkill, distanceToPlayer);
-            if (meleeSkill != null)
-            {
-                StartAttack(meleeSkill);
-                return;
-            }
-
-            AttackConfig normalAttack = PickRandomAvailableAttack(BossAttackType.Normal, distanceToPlayer);
-            if (normalAttack != null)
-            {
-                StartAttack(normalAttack);
-                return;
-            }
-
-            ApproachPlayer();
-            return;
-        }
-
-        AttackConfig rangedAttack = GetAttackByIndex(6);
-        if (rangedAttack != null && IsAttackReady(rangedAttack) && distanceToPlayer <= rangedAttack.attackRange)
-        {
-            StartAttack(rangedAttack);
-            return;
-        }
-
-        ApproachPlayer();
+        Vector3 a = transform.position;
+        Vector3 b = player.position;
+        a.y = 0f;
+        b.y = 0f;
+        return Vector3.Distance(a, b);
     }
 
-    AttackConfig PickRandomAvailableAttack(BossAttackType type, float distanceToPlayer)
+    BossAttackDefinition SelectAttack(float distanceToPlayer)
     {
-        List<AttackConfig> candidates = new List<AttackConfig>();
-
-        if (attacks == null)
+        if (attacks == null || attacks.Length == 0)
             return null;
 
+        List<BossAttackDefinition> candidates = new List<BossAttackDefinition>();
+        int bestScore = int.MinValue;
+
         for (int i = 0; i < attacks.Length; i++)
         {
-            AttackConfig cfg = attacks[i];
-            if (cfg == null) continue;
-            if (cfg.attackType != type) continue;
-            if (!IsAttackReady(cfg)) continue;
-            if (distanceToPlayer > cfg.attackRange) continue;
+            BossAttackDefinition attack = attacks[i];
+            if (attack == null)
+                continue;
 
-            candidates.Add(cfg);
+            if (!IsAttackReady(attack))
+                continue;
+
+            if (!attack.IsInRange(distanceToPlayer))
+                continue;
+
+            int score = EvaluateAttackScore(attack, distanceToPlayer);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                candidates.Clear();
+                candidates.Add(attack);
+            }
+            else if (score == bestScore)
+            {
+                candidates.Add(attack);
+            }
         }
 
         if (candidates.Count == 0)
@@ -244,21 +202,25 @@ public class BOSSAI : MonoBehaviour, IDamageable
         return candidates[Random.Range(0, candidates.Count)];
     }
 
-    AttackConfig GetAttackByIndex(int attackIndex)
+    int EvaluateAttackScore(BossAttackDefinition attack, float distanceToPlayer)
     {
-        if (attacks == null)
-            return null;
+        int score = attack.priority * 1000;
+        score -= Mathf.RoundToInt(Mathf.Abs(attack.PreferredRange - distanceToPlayer) * 100f);
 
-        for (int i = 0; i < attacks.Length; i++)
+        switch (attack.category)
         {
-            if (attacks[i] != null && attacks[i].attackIndex == attackIndex)
-                return attacks[i];
+            case BossAttackCategory.MeleeSkill:
+                score += 100;
+                break;
+            case BossAttackCategory.Ranged:
+                score += 50;
+                break;
         }
 
-        return null;
+        return score;
     }
 
-    bool IsAttackReady(AttackConfig attack)
+    bool IsAttackReady(BossAttackDefinition attack)
     {
         if (attack == null)
             return false;
@@ -269,7 +231,7 @@ public class BOSSAI : MonoBehaviour, IDamageable
         return Time.time >= readyTime;
     }
 
-    void SetAttackCooldown(AttackConfig attack)
+    void SetAttackCooldown(BossAttackDefinition attack)
     {
         if (attack == null)
             return;
@@ -277,140 +239,157 @@ public class BOSSAI : MonoBehaviour, IDamageable
         nextReadyTimeByIndex[attack.attackIndex] = Time.time + Mathf.Max(0f, attack.cooldown);
     }
 
-    void StartAttack(AttackConfig attack)
+    void UpdatePositioning(float distanceToPlayer)
+    {
+        currentState = BossState.Approach;
+
+        Vector3 direction = player.position - transform.position;
+        direction.y = 0f;
+
+        if (direction.sqrMagnitude < 0.0001f)
+        {
+            StopMove();
+            return;
+        }
+
+        float desiredDistance = GetDesiredCombatDistance(distanceToPlayer);
+        if (Mathf.Abs(distanceToPlayer - desiredDistance) <= combatDistanceTolerance)
+        {
+            StopMove();
+            return;
+        }
+
+        Vector3 desiredPosition = player.position - direction.normalized * desiredDistance;
+        if (Time.time - lastRepathTime <= repathInterval)
+            return;
+
+        lastRepathTime = Time.time;
+        agent.isStopped = false;
+        agent.updatePosition = true;
+        agent.SetDestination(desiredPosition);
+    }
+
+    float GetDesiredCombatDistance(float distanceToPlayer)
+    {
+        BossAttackDefinition spacingAttack = SelectSpacingAttack(distanceToPlayer);
+        if (spacingAttack != null)
+            return Mathf.Max(0f, spacingAttack.PreferredRange);
+
+        return Mathf.Max(0f, approachStopDistance);
+    }
+
+    BossAttackDefinition SelectSpacingAttack(float distanceToPlayer)
+    {
+        if (attacks == null || attacks.Length == 0)
+            return null;
+
+        BossAttackDefinition bestAttack = null;
+        int bestScore = int.MinValue;
+
+        for (int i = 0; i < attacks.Length; i++)
+        {
+            BossAttackDefinition attack = attacks[i];
+            if (attack == null)
+                continue;
+
+            int score = attack.priority * 1000;
+
+            if (IsAttackReady(attack))
+                score += 200;
+
+            if (attack.IsInRange(distanceToPlayer))
+                score += 100;
+
+            score -= Mathf.RoundToInt(Mathf.Abs(attack.PreferredRange - distanceToPlayer) * 100f);
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestAttack = attack;
+            }
+        }
+
+        return bestAttack;
+    }
+
+    void StartAttack(BossAttackDefinition attack)
     {
         if (attack == null)
             return;
 
-        if (staggerSystem != null && staggerSystem.ShouldLockBossAction())
-            return;
-
-        currentState = BossState.Attacking;
+        currentAttack = attack;
+        currentAttackElapsed = 0f;
         currentAttackIndex = attack.attackIndex;
-        SetAttackCooldown(attack);
+        currentAttackPhase = BossAttackPhase.Startup;
+        currentAttackWindowIndex = 0;
+        attackHitConfirmedThisWindow = false;
+        rangedAttackResultPending = false;
+        currentState = BossState.Attacking;
 
+        SetAttackCooldown(attack);
         StopMove();
+        if (staggerSystem != null)
+            staggerSystem.ClearPendingHitReaction();
+
+        SetWeaponTrailForAttack(attack);
+        SetWeaponTrailActive(false);
 
         if (meleeDamageWindow != null)
             meleeDamageWindow.ForceCloseWindow();
 
-        animatorController.RequestAttack(attack.attackIndex);
+        if (animatorController != null)
+        {
+            animatorController.SetTarget(player);
+            animatorController.RequestAttack(attack);
+            animatorController.SyncAttackPhase(currentAttackPhase);
+        }
     }
 
-    void UpdateAttackingState()
+    void UpdateAttackState()
     {
         if (animatorController == null)
             return;
 
-        if (staggerSystem != null && staggerSystem.ShouldLockBossAction())
+        if (currentAttack == null)
         {
-            StopMove();
-            currentState = BossState.Idle;
-
-            if (meleeDamageWindow != null)
-                meleeDamageWindow.ForceCloseWindow();
-
+            FinishAttack();
             return;
         }
 
-        if (!animatorController.IsBusyWithAttackMotion && !animatorController.IsInAttackState())
-        {
-            currentState = BossState.Idle;
-            currentAttackIndex = -1;
-
-            if (meleeDamageWindow != null)
-                meleeDamageWindow.ForceCloseWindow();
-
-            return;
-        }
+        currentAttackElapsed += Time.deltaTime;
+        BossAttackPhase evaluatedPhase = currentAttack.EvaluatePhase(currentAttackElapsed);
+        if (evaluatedPhase != currentAttackPhase)
+            SetAttackPhase(evaluatedPhase);
 
         StopMove();
+
+        if (!animatorController.IsBusyWithAttackMotion && !animatorController.IsInAttackState())
+            FinishAttack();
     }
 
-    void ApproachPlayer()
+    void SetAttackPhase(BossAttackPhase phase)
     {
-        if (staggerSystem != null && staggerSystem.ShouldLockBossAction())
-            return;
+        currentAttackPhase = phase;
 
-        currentState = BossState.Approach;
-
-        Vector3 dir = player.position - transform.position;
-        dir.y = 0f;
-
-        float dist = dir.magnitude;
-        if (dist <= approachStopDistance)
-        {
-            StopMove();
-            return;
-        }
-
-        Vector3 targetPos = player.position - dir.normalized * approachStopDistance;
-
-        if (Time.time - lastRepathTime > repathInterval)
-        {
-            lastRepathTime = Time.time;
-            agent.isStopped = false;
-            agent.SetDestination(targetPos);
-        }
+        if (animatorController != null)
+            animatorController.SyncAttackPhase(phase);
     }
 
-    bool ShouldRetreat()
+    void FinishAttack()
     {
-        if (currentState == BossState.Retreat)
-            return false;
+        currentAttack = null;
+        currentAttackElapsed = 0f;
+        currentAttackIndex = -1;
+        currentAttackPhase = BossAttackPhase.None;
+        currentAttackWindowIndex = 0;
+        attackHitConfirmedThisWindow = false;
+        rangedAttackResultPending = false;
 
-        if (Time.time < nextRetreatAllowedTime)
-            return false;
+        if (meleeDamageWindow != null)
+            meleeDamageWindow.ForceCloseWindow();
 
-        float recentDamage = GetRecentDamageTotal();
-        return recentDamage >= retreatDamageThreshold;
-    }
-
-    void StartRetreat()
-    {
-        if (staggerSystem != null && staggerSystem.ShouldLockBossAction())
-            return;
-
-        nextRetreatAllowedTime = Time.time + retreatCooldown;
-        ClearDamageWindow();
-
-        Vector3 away = transform.position - player.position;
-        away.y = 0f;
-
-        if (away.sqrMagnitude < 0.001f)
-            away = -transform.forward;
-
-        away.Normalize();
-        retreatTarget = transform.position + away * retreatDistance;
-
-        if (NavMesh.SamplePosition(retreatTarget, out NavMeshHit hit, 3f, NavMesh.AllAreas))
-            retreatTarget = hit.position;
-
-        agent.isStopped = false;
-        agent.SetDestination(retreatTarget);
-        currentState = BossState.Retreat;
-    }
-
-    void UpdateRetreat()
-    {
-        if (staggerSystem != null && staggerSystem.ShouldLockBossAction())
-        {
-            StopMove();
-            currentState = BossState.Idle;
-            return;
-        }
-
-        if (Time.time - lastRepathTime > repathInterval)
-        {
-            lastRepathTime = Time.time;
-            agent.SetDestination(retreatTarget);
-        }
-
-        if (!agent.pathPending && agent.remainingDistance <= agent.stoppingDistance + 0.15f)
-        {
-            StopMove();
-            currentState = BossState.Idle;
-        }
+        SetWeaponTrailActive(false);
+        currentState = BossState.Idle;
     }
 
     void StopMove()
@@ -420,17 +399,61 @@ public class BOSSAI : MonoBehaviour, IDamageable
 
         agent.isStopped = true;
         agent.ResetPath();
+        agent.velocity = Vector3.zero;
+    }
+
+    public void ForceInterruptAction()
+    {
+        if (meleeDamageWindow != null)
+            meleeDamageWindow.ForceCloseWindow();
+
+        StopMove();
+
+        if (animatorController != null)
+            animatorController.AbortAttackMotion();
+
+        if (staggerSystem != null)
+            staggerSystem.ClearPendingHitReaction();
+
+        SetWeaponTrailActive(false);
+        currentAttack = null;
+        currentAttackElapsed = 0f;
+        currentAttackIndex = -1;
+        currentAttackPhase = BossAttackPhase.None;
+        currentAttackWindowIndex = 0;
+        attackHitConfirmedThisWindow = false;
+        rangedAttackResultPending = false;
+
+        if (currentState != BossState.Dead)
+            currentState = BossState.Idle;
+    }
+
+    public bool CanInterruptWithHitReaction()
+    {
+        if (currentState != BossState.Attacking || currentAttack == null)
+            return true;
+
+        return currentAttack.IsInterruptible(currentAttackPhase);
     }
 
     void Die()
     {
         currentState = BossState.Dead;
+        attackHitConfirmedThisWindow = false;
+        rangedAttackResultPending = false;
 
         if (meleeDamageWindow != null)
             meleeDamageWindow.ForceCloseWindow();
 
+        SetWeaponTrailActive(false);
         StopMove();
-        animatorController.PlayDeath();
+
+        if (animatorController != null)
+            animatorController.PlayDeath();
+
+        if (staggerSystem != null)
+            staggerSystem.ClearPendingHitReaction();
+
         enabled = false;
     }
 
@@ -439,58 +462,71 @@ public class BOSSAI : MonoBehaviour, IDamageable
         if (currentState == BossState.Dead)
             return;
 
-        float dmg = Mathf.Max(0f, amount);
-        currentHP = Mathf.Max(0f, currentHP - dmg);
+        float safeAmount = Mathf.Max(0f, amount);
+        if (safeAmount <= 0f)
+            return;
 
-        damageRecords.Add(new DamageRecord
-        {
-            time = Time.time,
-            amount = dmg
-        });
+        if (combatAudioController != null)
+            combatAudioController.PlayHurt();
 
+        currentHP = Mathf.Max(0f, currentHP - safeAmount);
         if (currentHP <= 0f)
             Die();
     }
 
-    float GetRecentDamageTotal()
+    void SetWeaponTrailForAttack(BossAttackDefinition attack)
     {
-        float total = 0f;
-        float minTime = Time.time - damageWindow;
+        if (weaponTrailVFX == null || attack == null)
+            return;
 
-        for (int i = 0; i < damageRecords.Count; i++)
-        {
-            if (damageRecords[i].time >= minTime)
-                total += damageRecords[i].amount;
-        }
-
-        return total;
+        weaponTrailVFX.SetTrailSet(GetTrailSetForAttack(attack.attackIndex));
     }
 
-    void CleanupOldDamageRecords()
+    void SetWeaponTrailActive(bool active)
     {
-        float minTime = Time.time - damageWindow;
+        if (weaponTrailVFX == null)
+            return;
 
-        for (int i = damageRecords.Count - 1; i >= 0; i--)
-        {
-            if (damageRecords[i].time < minTime)
-                damageRecords.RemoveAt(i);
-        }
+        if (active)
+            weaponTrailVFX.TrailOn();
+        else
+            weaponTrailVFX.TrailOff();
     }
 
-    void ClearDamageWindow()
+    BossWeaponTrailController.TrailSet GetTrailSetForAttack(int attackIndex)
     {
-        damageRecords.Clear();
+        switch (attackIndex)
+        {
+            case 3:
+                return BossWeaponTrailController.TrailSet.MeleeSkill1;
+            case 4:
+                return BossWeaponTrailController.TrailSet.MeleeSkill2;
+            case 5:
+                return BossWeaponTrailController.TrailSet.MeleeSkill3;
+            case 6:
+                return BossWeaponTrailController.TrailSet.Ranged;
+            default:
+                return BossWeaponTrailController.TrailSet.Normal;
+        }
     }
 
     public void AnimEvent_OpenMeleeWindow()
     {
+        AnimEvent_OpenMeleeWindowSection(0);
+    }
+
+    public void AnimEvent_OpenMeleeWindowSection(int windowIndex)
+    {
         if (staggerSystem != null && staggerSystem.ShouldLockBossAction())
             return;
 
-        if (meleeDamageWindow == null)
+        if (meleeDamageWindow == null || currentAttack == null || !currentAttack.opensMeleeWindow)
             return;
 
-        meleeDamageWindow.OpenWindow(currentAttackIndex);
+        currentAttackWindowIndex = Mathf.Max(0, windowIndex);
+        attackHitConfirmedThisWindow = false;
+        meleeDamageWindow.OpenWindow(currentAttackIndex, currentAttackWindowIndex);
+        SetAttackPhase(BossAttackPhase.Active);
     }
 
     public void AnimEvent_CloseMeleeWindow()
@@ -498,7 +534,15 @@ public class BOSSAI : MonoBehaviour, IDamageable
         if (meleeDamageWindow == null)
             return;
 
+        if (!attackHitConfirmedThisWindow && combatAudioController != null)
+            combatAudioController.PlayAttackMiss();
+
         meleeDamageWindow.CloseWindow();
+        currentAttackWindowIndex = 0;
+        attackHitConfirmedThisWindow = false;
+
+        if (currentState == BossState.Attacking)
+            SetAttackPhase(BossAttackPhase.Recovery);
     }
 
     public void AnimEvent_FireProjectile()
@@ -506,27 +550,256 @@ public class BOSSAI : MonoBehaviour, IDamageable
         if (staggerSystem != null && staggerSystem.ShouldLockBossAction())
             return;
 
-        if (rangedSkillCaster == null)
+        if (rangedSkillCaster == null || currentAttack == null || !currentAttack.firesProjectile)
             return;
 
-        rangedSkillCaster.FireAtPlayer(currentAttackIndex);
+        SetAttackPhase(BossAttackPhase.Active);
+
+        Vector3 attackDirection = animatorController != null
+            ? animatorController.GetCurrentAttackDirection()
+            : transform.forward;
+
+        attackHitConfirmedThisWindow = false;
+        rangedAttackResultPending = rangedSkillCaster.Fire(currentAttackIndex, attackDirection);
+    }
+
+    public void AnimEvent_LockAttackDirection()
+    {
+        if (animatorController == null)
+            return;
+
+        animatorController.LockCurrentAttackDirection();
+    }
+
+    public void AnimEvent_PlayAttackSFX()
+    {
+        if (combatAudioController == null)
+            return;
+
+        combatAudioController.PlayAttackStart();
+    }
+
+    public void NotifyAttackHitConfirmed()
+    {
+        if (currentState == BossState.Dead)
+            return;
+
+        if (attackHitConfirmedThisWindow)
+            return;
+
+        attackHitConfirmedThisWindow = true;
+        rangedAttackResultPending = false;
+
+        if (combatAudioController != null)
+            combatAudioController.PlayAttackHit();
+    }
+
+    public void NotifyRangedAttackMiss()
+    {
+        if (currentState == BossState.Dead)
+            return;
+
+        if (!rangedAttackResultPending)
+            return;
+
+        rangedAttackResultPending = false;
+
+        if (!attackHitConfirmedThisWindow && combatAudioController != null)
+            combatAudioController.PlayAttackMiss();
     }
 
     void OnDrawGizmosSelected()
     {
-        if (!drawGizmos) return;
-
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawWireSphere(transform.position, meleeDecisionDistance);
+        if (!drawGizmos)
+            return;
 
         Gizmos.color = Color.cyan;
         Gizmos.DrawWireSphere(transform.position, engageDistance);
 
-        if (currentState == BossState.Retreat)
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, approachStopDistance);
+    }
+
+    static BossAttackDefinition[] CreateDefaultAttackSet()
+    {
+        return new[]
         {
-            Gizmos.color = Color.blue;
-            Gizmos.DrawSphere(retreatTarget, 0.2f);
-            Gizmos.DrawLine(transform.position, retreatTarget);
-        }
+            new BossAttackDefinition
+            {
+                displayName = "Normal 1",
+                attackIndex = 0,
+                category = BossAttackCategory.Normal,
+                cooldown = 4f,
+                minRange = 0f,
+                maxRange = 4f,
+                preferredDistance = 4f,
+                priority = 10,
+                startupDuration = 0.25f,
+                activeDuration = 0.2f,
+                recoveryDuration = 0.45f,
+                alignBeforeAttack = true,
+                useRootMotionPosition = true,
+                useRootMotionRotation = true,
+                trackTargetUntilDirectionLock = false,
+                requireDirectionLockEvent = false,
+                opensMeleeWindow = true,
+                firesProjectile = false,
+                interruptibleInStartup = false,
+                interruptibleInActive = false,
+                interruptibleInRecovery = true
+            },
+            new BossAttackDefinition
+            {
+                displayName = "Normal 2",
+                attackIndex = 1,
+                category = BossAttackCategory.Normal,
+                cooldown = 4f,
+                minRange = 0f,
+                maxRange = 4f,
+                preferredDistance = 4f,
+                priority = 10,
+                startupDuration = 0.28f,
+                activeDuration = 0.2f,
+                recoveryDuration = 0.42f,
+                alignBeforeAttack = true,
+                useRootMotionPosition = true,
+                useRootMotionRotation = true,
+                trackTargetUntilDirectionLock = false,
+                requireDirectionLockEvent = false,
+                opensMeleeWindow = true,
+                firesProjectile = false,
+                interruptibleInStartup = false,
+                interruptibleInActive = false,
+                interruptibleInRecovery = true
+            },
+            new BossAttackDefinition
+            {
+                displayName = "Normal 3",
+                attackIndex = 2,
+                category = BossAttackCategory.Normal,
+                cooldown = 4f,
+                minRange = 0f,
+                maxRange = 4.5f,
+                preferredDistance = 4f,
+                priority = 11,
+                startupDuration = 0.32f,
+                activeDuration = 0.22f,
+                recoveryDuration = 0.42f,
+                alignBeforeAttack = true,
+                useRootMotionPosition = true,
+                useRootMotionRotation = true,
+                trackTargetUntilDirectionLock = false,
+                requireDirectionLockEvent = false,
+                opensMeleeWindow = true,
+                firesProjectile = false,
+                interruptibleInStartup = false,
+                interruptibleInActive = false,
+                interruptibleInRecovery = true
+            },
+            new BossAttackDefinition
+            {
+                displayName = "Melee Skill 1",
+                attackIndex = 3,
+                category = BossAttackCategory.MeleeSkill,
+                cooldown = 8f,
+                minRange = 0f,
+                maxRange = 6f,
+                preferredDistance = 4.5f,
+                priority = 20,
+                startupDuration = 0.35f,
+                activeDuration = 0.22f,
+                recoveryDuration = 0.38f,
+                alignBeforeAttack = true,
+                useRootMotionPosition = true,
+                useRootMotionRotation = false,
+                trackTargetUntilDirectionLock = true,
+                requireDirectionLockEvent = true,
+                maxTurnAngle = 35f,
+                turnSpeed = 360f,
+                opensMeleeWindow = true,
+                firesProjectile = false,
+                interruptibleInStartup = false,
+                interruptibleInActive = false,
+                interruptibleInRecovery = true
+            },
+            new BossAttackDefinition
+            {
+                displayName = "Melee Skill 2",
+                attackIndex = 4,
+                category = BossAttackCategory.MeleeSkill,
+                cooldown = 10f,
+                minRange = 0f,
+                maxRange = 6.5f,
+                preferredDistance = 5f,
+                priority = 21,
+                startupDuration = 0.38f,
+                activeDuration = 0.24f,
+                recoveryDuration = 0.4f,
+                alignBeforeAttack = true,
+                useRootMotionPosition = true,
+                useRootMotionRotation = false,
+                trackTargetUntilDirectionLock = true,
+                requireDirectionLockEvent = true,
+                maxTurnAngle = 35f,
+                turnSpeed = 360f,
+                opensMeleeWindow = true,
+                firesProjectile = false,
+                interruptibleInStartup = false,
+                interruptibleInActive = false,
+                interruptibleInRecovery = true
+            },
+            new BossAttackDefinition
+            {
+                displayName = "Melee Skill 3",
+                attackIndex = 5,
+                category = BossAttackCategory.MeleeSkill,
+                cooldown = 10f,
+                minRange = 0f,
+                maxRange = 6.5f,
+                preferredDistance = 5f,
+                priority = 22,
+                startupDuration = 0.42f,
+                activeDuration = 0.24f,
+                recoveryDuration = 0.42f,
+                alignBeforeAttack = true,
+                useRootMotionPosition = true,
+                useRootMotionRotation = false,
+                trackTargetUntilDirectionLock = true,
+                requireDirectionLockEvent = true,
+                maxTurnAngle = 35f,
+                turnSpeed = 360f,
+                opensMeleeWindow = true,
+                firesProjectile = false,
+                interruptibleInStartup = false,
+                interruptibleInActive = false,
+                interruptibleInRecovery = true
+            },
+            new BossAttackDefinition
+            {
+                displayName = "Ranged",
+                attackIndex = 6,
+                category = BossAttackCategory.Ranged,
+                cooldown = 15f,
+                minRange = 4.5f,
+                maxRange = 12f,
+                preferredDistance = 8f,
+                priority = 18,
+                startupDuration = 0.4f,
+                activeDuration = 0.2f,
+                recoveryDuration = 0.45f,
+                alignBeforeAttack = true,
+                useRootMotionPosition = true,
+                useRootMotionRotation = false,
+                trackTargetUntilDirectionLock = true,
+                requireDirectionLockEvent = true,
+                maxTurnAngle = 35f,
+                turnSpeed = 360f,
+                opensMeleeWindow = false,
+                firesProjectile = true,
+                interruptibleInStartup = false,
+                interruptibleInActive = false,
+                interruptibleInRecovery = true
+            }
+        };
     }
 }

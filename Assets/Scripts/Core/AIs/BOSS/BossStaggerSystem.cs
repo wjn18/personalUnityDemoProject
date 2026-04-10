@@ -2,6 +2,13 @@ using UnityEngine;
 
 public class BossStaggerSystem : MonoBehaviour
 {
+    public enum PlayerHitType
+    {
+        Normal,
+        Sprint,
+        Heavy
+    }
+
     enum KneelSequencePhase
     {
         None,
@@ -19,6 +26,8 @@ public class BossStaggerSystem : MonoBehaviour
     [Header("Animator Params")]
     public string hitTriggerParam = "HitTrigger";
     public string kneelTriggerParam = "KneelTrigger";
+    public string locomotionStateName = "Locomotion";
+    public float hitReactionInterruptBlendDuration = 0.05f;
 
     [Header("RV")]
     public float maxRV = 200f;
@@ -188,14 +197,22 @@ public class BossStaggerSystem : MonoBehaviour
 
     public void TakeStaggerDamage(float amount)
     {
+        TakeStaggerDamage(amount, PlayerHitType.Normal);
+    }
+
+    public void TakeStaggerDamage(float amount, PlayerHitType hitType)
+    {
         if (bossAI == null || animatorController == null || animatorController.Animator == null)
             return;
 
         if (bossAI.currentState == BOSSAI.BossState.Dead)
             return;
 
-        if (IsInKneelSequence())
+        if (ShouldIgnoreHitReactionCompletely())
+        {
+            ClearPendingHitReaction();
             return;
+        }
 
         lastHitTime = Time.time;
         currentRV = Mathf.Clamp(currentRV - Mathf.Max(0f, amount), 0f, maxRV);
@@ -206,30 +223,37 @@ public class BossStaggerSystem : MonoBehaviour
             return;
         }
 
-        if (!CanPlayHitReaction())
+        if (!CanPlayHitReaction(hitType))
+        {
+            ClearPendingHitReaction();
             return;
+        }
 
+        if (ShouldInterruptAttackForHitReaction(hitType))
+            InterruptAttackForHitReaction();
+
+        ClearPendingHitReaction();
         animatorController.Animator.SetTrigger(hitTriggerParam);
     }
 
-    bool CanPlayHitReaction()
+    bool CanPlayHitReaction(PlayerHitType hitType)
     {
         if (bossAI == null || animatorController == null)
             return false;
 
-        if (IsInKneelSequence())
+        if (ShouldIgnoreHitReactionCompletely())
             return false;
 
-        if (animatorController.IsInKneelLikeState())
-            return false;
-
-        if (bossAI.currentState == BOSSAI.BossState.Attacking || animatorController.IsInAttackState())
-            return false;
-
-        if (currentRV <= maxRV * alwaysOpenThresholdPercent)
+        if (currentRV <= 30f)
             return true;
 
-        return staggerWindowOpen;
+        if (hitType == PlayerHitType.Heavy)
+            return true;
+
+        if (IsInAttackState())
+            return false;
+
+        return true;
     }
 
     void EnterKneel()
@@ -246,11 +270,10 @@ public class BossStaggerSystem : MonoBehaviour
 
         if (bossAI != null)
         {
-            bossAI.currentState = BOSSAI.BossState.Idle;
-            bossAI.SendMessage("StopMove", SendMessageOptions.DontRequireReceiver);
+            bossAI.ForceInterruptAction();
         }
 
-        animatorController.Animator.ResetTrigger(hitTriggerParam);
+        ClearPendingHitReaction();
         animatorController.Animator.SetTrigger(kneelTriggerParam);
     }
 
@@ -270,6 +293,7 @@ public class BossStaggerSystem : MonoBehaviour
         waitingToReleaseKneelBool = false;
         releaseKneelBoolTimer = 0f;
 
+        ClearPendingHitReaction();
         currentRV = maxRV;
         lastHitTime = Time.time;
     }
@@ -289,7 +313,7 @@ public class BossStaggerSystem : MonoBehaviour
         bossAI.TakeDamage(executeDamage, executor.gameObject);
 
         animatorController.Animator.ResetTrigger(kneelTriggerParam);
-        animatorController.Animator.SetTrigger(hitTriggerParam);
+        ClearPendingHitReaction();
 
         FinishKneelSequence();
 
@@ -332,6 +356,67 @@ public class BossStaggerSystem : MonoBehaviour
             return 0f;
 
         return Mathf.Clamp01(currentRV / maxRV);
+    }
+
+    public void ClearPendingHitReaction()
+    {
+        if (animatorController == null || animatorController.Animator == null)
+            return;
+
+        animatorController.Animator.ResetTrigger(hitTriggerParam);
+    }
+
+    bool ShouldIgnoreHitReactionCompletely()
+    {
+        if (bossAI == null || animatorController == null)
+            return true;
+
+        if (bossAI.currentState == BOSSAI.BossState.Dead)
+            return true;
+
+        if (IsInKneelSequence())
+            return true;
+
+        if (currentRV <= 0f && animatorController.IsInKneelLikeState())
+            return true;
+
+        if (animatorController.IsInKneelLikeState())
+            return true;
+
+        return false;
+    }
+
+    bool IsInAttackState()
+    {
+        if (bossAI != null && bossAI.currentState == BOSSAI.BossState.Attacking)
+            return true;
+
+        if (animatorController == null)
+            return false;
+
+        return animatorController.IsBusyWithAttackMotion || animatorController.IsInAttackState();
+    }
+
+    bool ShouldInterruptAttackForHitReaction(PlayerHitType hitType)
+    {
+        if (!IsInAttackState())
+            return false;
+
+        if (currentRV <= 30f)
+            return true;
+
+        return hitType == PlayerHitType.Heavy;
+    }
+
+    void InterruptAttackForHitReaction()
+    {
+        if (bossAI != null)
+            bossAI.ForceInterruptAction();
+
+        if (animatorController == null || animatorController.Animator == null || string.IsNullOrEmpty(locomotionStateName))
+            return;
+
+        animatorController.Animator.CrossFade(locomotionStateName, Mathf.Max(0f, hitReactionInterruptBlendDuration), 0);
     }
 
 

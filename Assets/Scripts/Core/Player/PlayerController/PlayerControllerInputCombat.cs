@@ -6,6 +6,12 @@ public partial class PlayerController
     {
         if (Input.GetKeyDown(sprintKey))
         {
+            if (sprintMode)
+            {
+                ExitSprintMode();
+                return;
+            }
+
             if (isDead) return;
             if (isRolling) return;
             if (isInHitReaction) return;
@@ -107,6 +113,7 @@ public partial class PlayerController
         isBerserkActive = true;
         isPoweringUp = true;
         berserkEndTime = Time.time + berserkDuration;
+        HandleBerserkStarted();
 
         ExitSprintMode();
         StopBlockingInternal();
@@ -130,6 +137,7 @@ public partial class PlayerController
         {
             isBerserkActive = false;
             isPoweringUp = false;
+            HandleBerserkEnded();
         }
     }
 
@@ -138,10 +146,22 @@ public partial class PlayerController
         if (!TrySpendSP(rollSPCost))
             return;
 
+        bool lockedOn = IsLockedOn();
+
         isRolling = true;
         cachedRollMotionDirection = GetRollStartDirection();
         useRollMoveSpeedOverride = true;
-        rollMoveSpeedOverride = rollDefaultMoveSpeed;
+        rollMoveSpeedOverride = lockedOn ? lockOnRollMoveSpeed : rollDefaultMoveSpeed;
+        lockOnRollUsesScriptMotion = lockedOn;
+
+        if (animator != null)
+        {
+            cachedAnimatorApplyRootMotion = animator.applyRootMotion;
+            restoreAnimatorRootMotionAfterLockOnRoll = lockedOn;
+
+            if (lockedOn)
+                animator.applyRootMotion = false;
+        }
 
         ExitSprintMode();
         StopBlockingInternal();
@@ -234,6 +254,17 @@ public partial class PlayerController
         }
 
         return 10f;
+    }
+
+    BossStaggerSystem.PlayerHitType GetCurrentBossHitType()
+    {
+        if (heavyAttackActive)
+            return BossStaggerSystem.PlayerHitType.Heavy;
+
+        if (sprintAttackActive)
+            return BossStaggerSystem.PlayerHitType.Sprint;
+
+        return BossStaggerSystem.PlayerHitType.Normal;
     }
 
     void HandleLeftMouseAttackInput()
@@ -359,6 +390,7 @@ public partial class PlayerController
         canMoveCancelAttack = false;
         moveWasHeldWhenCancelWindowOpened = false;
         attackWindowActive = false;
+        attackHitConfirmedThisWindow = false;
         hitTargetsThisSwing.Clear();
         SetCurrentAttackData(sprintAttackData);
 
@@ -389,6 +421,7 @@ public partial class PlayerController
         canMoveCancelAttack = false;
         moveWasHeldWhenCancelWindowOpened = false;
         attackWindowActive = false;
+        attackHitConfirmedThisWindow = false;
         hitTargetsThisSwing.Clear();
         SetCurrentAttackData(heavyAttackData);
 
@@ -425,6 +458,7 @@ public partial class PlayerController
         canMoveCancelAttack = false;
         moveWasHeldWhenCancelWindowOpened = false;
         attackWindowActive = false;
+        attackHitConfirmedThisWindow = false;
         hitTargetsThisSwing.Clear();
         SetCurrentAttackData(attack1Data);
 
@@ -522,6 +556,7 @@ public partial class PlayerController
             if (!isValidEnemyTarget)
                 continue;
 
+            bool firstHitThisWindow = !attackHitConfirmedThisWindow;
             hitTargetsThisSwing.Add(damageable);
 
             EnemyAnimationController enemyAnim = col.GetComponentInParent<EnemyAnimationController>();
@@ -530,9 +565,10 @@ public partial class PlayerController
 
             damageable.TakeDamage(damage, gameObject);
             HealOnHitIfBerserk();
+            PlayPlayerHitEffect(col);
 
             if (boss != null)
-                boss.TakeStaggerDamage(GetCurrentAttackStaggerValue());
+                boss.TakeStaggerDamage(GetCurrentAttackStaggerValue(), GetCurrentBossHitType());
 
             if (shouldTriggerHeavyHit)
                 enemyAnim.PlayHeavyHitReaction();
@@ -542,6 +578,14 @@ public partial class PlayerController
 
             if (stats != null && enemyRuntime != null && wasAliveBeforeHit && enemyRuntime.IsDead())
                 stats.GrantKillRewards();
+
+            if (firstHitThisWindow)
+            {
+                attackHitConfirmedThisWindow = true;
+                PlayPlayerAttackHitSFX();
+                TryPlayPlayerAttackHitShake();
+                TriggerPlayerHitStop();
+            }
         }
     }
 
@@ -615,18 +659,21 @@ public partial class PlayerController
     void PlayBlockedHitReaction()
     {
         ClearActionStateForHit(keepBlocking: true, keepSprint: false);
+        PlayPlayerBlockedHitSFX();
         TriggerAnimatorTrigger(blockedHitTriggerParam);
     }
 
     void PlaySmallHitReaction()
     {
         ClearActionStateForHit(keepBlocking: false, keepSprint: false);
+        PlayPlayerHurtSFX();
         TriggerAnimatorTrigger(hitSmallTriggerParam);
     }
 
     void PlayBigHitReaction()
     {
         ClearActionStateForHit(keepBlocking: false, keepSprint: false);
+        PlayPlayerHurtSFX();
         TriggerAnimatorTrigger(hitBigTriggerParam);
     }
 

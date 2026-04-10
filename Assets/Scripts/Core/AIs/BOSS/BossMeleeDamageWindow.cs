@@ -7,6 +7,8 @@ public class BossMeleeDamageWindow : MonoBehaviour
     public class MeleeDamageConfig
     {
         public int attackIndex;
+        public int windowIndex;
+        public Transform hitOriginOverride;
         public float damage = 20f;
         public float radius = 2f;
         public float facingAngle = 80f;
@@ -33,6 +35,7 @@ public class BossMeleeDamageWindow : MonoBehaviour
 
     bool windowOpen = false;
     int activeAttackIndex = -1;
+    int activeWindowIndex = 0;
 
     readonly HashSet<GameObject> hitTargetsThisWindow = new HashSet<GameObject>();
     Collider[] cachedTargetColliders;
@@ -50,7 +53,7 @@ public class BossMeleeDamageWindow : MonoBehaviour
         if (ownerAI == null || ownerAI.player == null)
             return;
 
-        Transform origin = hitOrigin != null ? hitOrigin : transform;
+        Transform origin = GetActiveHitOrigin();
         Vector3 center = origin.position;
 
         float radius = GetActiveRadius();
@@ -73,13 +76,30 @@ public class BossMeleeDamageWindow : MonoBehaviour
         if (hitTargetsThisWindow.Contains(playerRoot))
             return;
 
+        Vector3 hitPoint = GetPlayerAimPoint();
+        Vector3 hitNormal = hitPoint - center;
+        if (hitNormal.sqrMagnitude < 0.0001f)
+            hitNormal = ownerAI.transform.forward;
+
         ApplyDamageToPlayer(damage);
         hitTargetsThisWindow.Add(playerRoot);
+
+        if (ownerAI != null && ownerAI.combatAudioController != null)
+            ownerAI.combatAudioController.PlayHitEffect(hitPoint, hitNormal);
+
+        if (ownerAI != null)
+            ownerAI.NotifyAttackHitConfirmed();
     }
 
     public void OpenWindow(int attackIndex)
     {
+        OpenWindow(attackIndex, 0);
+    }
+
+    public void OpenWindow(int attackIndex, int windowIndex)
+    {
         activeAttackIndex = attackIndex;
+        activeWindowIndex = Mathf.Max(0, windowIndex);
         windowOpen = true;
         hitTargetsThisWindow.Clear();
         CacheTargetColliders(forceRefresh: true);
@@ -89,6 +109,7 @@ public class BossMeleeDamageWindow : MonoBehaviour
     {
         windowOpen = false;
         activeAttackIndex = -1;
+        activeWindowIndex = 0;
         hitTargetsThisWindow.Clear();
     }
 
@@ -228,23 +249,32 @@ public class BossMeleeDamageWindow : MonoBehaviour
         return bestPoint;
     }
 
-    MeleeDamageConfig GetConfig(int attackIndex)
+    MeleeDamageConfig GetConfig(int attackIndex, int windowIndex)
     {
         if (meleeConfigs == null)
             return null;
 
+        MeleeDamageConfig attackFallback = null;
+
         for (int i = 0; i < meleeConfigs.Length; i++)
         {
-            if (meleeConfigs[i] != null && meleeConfigs[i].attackIndex == attackIndex)
-                return meleeConfigs[i];
+            MeleeDamageConfig cfg = meleeConfigs[i];
+            if (cfg == null || cfg.attackIndex != attackIndex)
+                continue;
+
+            if (cfg.windowIndex == windowIndex)
+                return cfg;
+
+            if (cfg.windowIndex == 0 && attackFallback == null)
+                attackFallback = cfg;
         }
 
-        return null;
+        return attackFallback;
     }
 
     float GetActiveRadius()
     {
-        MeleeDamageConfig cfg = GetConfig(activeAttackIndex);
+        MeleeDamageConfig cfg = GetConfig(activeAttackIndex, activeWindowIndex);
         if (cfg != null)
             return Mathf.Max(0f, cfg.radius);
 
@@ -253,7 +283,7 @@ public class BossMeleeDamageWindow : MonoBehaviour
 
     float GetActiveDamage()
     {
-        MeleeDamageConfig cfg = GetConfig(activeAttackIndex);
+        MeleeDamageConfig cfg = GetConfig(activeAttackIndex, activeWindowIndex);
         if (cfg != null)
             return Mathf.Max(0f, cfg.damage);
 
@@ -262,11 +292,23 @@ public class BossMeleeDamageWindow : MonoBehaviour
 
     float GetActiveFacingAngle()
     {
-        MeleeDamageConfig cfg = GetConfig(activeAttackIndex);
+        MeleeDamageConfig cfg = GetConfig(activeAttackIndex, activeWindowIndex);
         if (cfg != null)
             return Mathf.Clamp(cfg.facingAngle, 0f, 180f);
 
         return Mathf.Clamp(fallbackFacingAngle, 0f, 180f);
+    }
+
+    Transform GetActiveHitOrigin()
+    {
+        MeleeDamageConfig cfg = GetConfig(activeAttackIndex, activeWindowIndex);
+        if (cfg != null && cfg.hitOriginOverride != null)
+            return cfg.hitOriginOverride;
+
+        if (hitOrigin != null)
+            return hitOrigin;
+
+        return transform;
     }
 
     void ApplyDamageToPlayer(float damage)
@@ -315,7 +357,7 @@ public class BossMeleeDamageWindow : MonoBehaviour
         if (!drawEvenWhenClosed && !windowOpen)
             return;
 
-        Transform origin = hitOrigin != null ? hitOrigin : transform;
+        Transform origin = GetActiveHitOrigin();
         Vector3 center = origin.position;
 
         float radius = windowOpen ? GetActiveRadius() : Mathf.Max(0f, fallbackRadius);

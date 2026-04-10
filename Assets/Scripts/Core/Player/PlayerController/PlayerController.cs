@@ -8,6 +8,8 @@ public partial class PlayerController : MonoBehaviour
     public CharacterController characterController;
     public PlayerLockOn playerLockOn;
     public PlayerStatsRuntime stats;
+    public PlayerWeaponTrailController weaponTrailVFX;
+    public CombatAudioController combatAudioController;
 
     [Header("Movement - Free")]
     public float freeMoveSpeed = 6f;
@@ -49,6 +51,9 @@ public partial class PlayerController : MonoBehaviour
     [Header("Roll Move Override")]
     public float rollDefaultMoveSpeed = 6f;
 
+    [Header("Lock-On Roll")]
+    public float lockOnRollMoveSpeed = 10f;
+
     [Header("SP Recovery Control")]
     public bool blockStopsSPRecovery = true;
     public bool sprintStopsSPRecovery = true;
@@ -78,6 +83,9 @@ public partial class PlayerController : MonoBehaviour
     public float attackRadius = 2.7f;
     public LayerMask targetLayers;
     public float fallbackAttackDamage = 10f;
+
+    [Header("Player Hit Stop")]
+    public int playerHitStopFrames = 3;
 
     [Header("Attack Data")]
     public PlayerAttackData attack1Data = new PlayerAttackData
@@ -141,6 +149,11 @@ public partial class PlayerController : MonoBehaviour
     public float berserkSPRecoveryMultiplier = 2f;
     public float berserkHealPerAttack = 1f;
 
+    [Header("Berserk VFX")]
+    public GameObject[] berserkEnterVFX;
+    public GameObject[] berserkActiveVFX;
+    public float berserkEnterVFXFallbackLifetime = 2f;
+
     [Header("Power Up Animation")]
     public string powerUpTriggerParam = "PowerUpTrigger";
     public string powerUpStateName = "SandS Power Up";
@@ -186,13 +199,20 @@ public partial class PlayerController : MonoBehaviour
     bool previousMoveHeld = false;
 
     bool attackWindowActive = false;
+    bool attackHitConfirmedThisWindow = false;
     bool blockLockedByLowSP = false;
+    bool hitStopActive = false;
+    float hitStopPreviousTimeScale = 1f;
+    float hitStopPreviousFixedDeltaTime = 0.02f;
 
     bool useAttackMoveSpeedOverride = false;
     float attackMoveSpeedOverride = 0f;
 
     bool useRollMoveSpeedOverride = false;
     float rollMoveSpeedOverride = 0f;
+    bool lockOnRollUsesScriptMotion = false;
+    bool restoreAnimatorRootMotionAfterLockOnRoll = false;
+    bool cachedAnimatorApplyRootMotion = false;
 
     bool leftMouseTracking = false;
     bool heavyAttackTriggeredThisPress = false;
@@ -224,6 +244,8 @@ public partial class PlayerController : MonoBehaviour
         characterController = GetComponent<CharacterController>();
         playerLockOn = GetComponent<PlayerLockOn>();
         stats = GetComponent<PlayerStatsRuntime>();
+        weaponTrailVFX = GetComponentInChildren<PlayerWeaponTrailController>(true);
+        combatAudioController = GetComponentInChildren<CombatAudioController>(true);
     }
 
     void Awake()
@@ -239,6 +261,14 @@ public partial class PlayerController : MonoBehaviour
 
         if (stats == null)
             stats = GetComponent<PlayerStatsRuntime>();
+
+        if (weaponTrailVFX == null)
+            weaponTrailVFX = GetComponentInChildren<PlayerWeaponTrailController>(true);
+
+        if (combatAudioController == null)
+            combatAudioController = GetComponentInChildren<CombatAudioController>(true);
+
+        InitializeBerserkVFX();
     }
 
     void Update()
@@ -302,6 +332,9 @@ public partial class PlayerController : MonoBehaviour
         animator.SetBool(queueNextAttackParam, false);
         animator.SetBool(isDeadParam, true);
         animator.SetBool(isSprintingParam, false);
+
+        SetWeaponTrailActive(false);
+        HandleBerserkEnded();
     }
 
     void OnDrawGizmosSelected()
@@ -314,5 +347,10 @@ public partial class PlayerController : MonoBehaviour
 
         Gizmos.color = attackWindowActive ? Color.yellow : Color.red;
         Gizmos.DrawWireSphere(attackPoint.position, gizmoRadius);
+    }
+
+    void OnDisable()
+    {
+        RestorePlayerHitStopTimeScale();
     }
 }

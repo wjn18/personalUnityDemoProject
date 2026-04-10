@@ -71,8 +71,22 @@ ModelImporter:
         floatParameter: 0
         intParameter: 0
         messageOptions: 0
-      - time: 0.54621273
+      - time: 0.41368893
+        functionName: AE_SlashVFXOn
+        data: 
+        objectReferenceParameter: {instanceID: 0}
+        floatParameter: 0
+        intParameter: 0
+        messageOptions: 0
+      - time: 0.51496273
         functionName: AE_EndAttackWindow
+        data: 
+        objectReferenceParameter: {instanceID: 0}
+        floatParameter: 0
+        intParameter: 0
+        messageOptions: 0
+      - time: 0.529296
+        functionName: AE_SlashVFXOff
         data: 
         objectReferenceParameter: {instanceID: 0}
         floatParameter: 0
